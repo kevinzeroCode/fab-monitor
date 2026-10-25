@@ -1,0 +1,13 @@
+# 減少 build context，避免把本機套件、快取、Git 與文件送入建置。
+.git
+.venv
+.cache
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+**/tests
+docs
+SPEC.md
+README.md
+.env
+.env.*

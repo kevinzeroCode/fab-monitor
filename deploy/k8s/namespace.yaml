@@ -1,0 +1,5 @@
+# 把練習資源集中管理，查詢與清理時不會混到系統 namespace。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fab

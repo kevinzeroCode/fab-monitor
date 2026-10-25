@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fab-monitor · 機台監控</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101820; color: #eaf0f5; }
+    * { box-sizing: border-box; }
+    body { max-width: 1200px; margin: auto; padding: 24px; }
+    header, .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    h1 { margin-bottom: 4px; } h2 { margin-top: 0; font-size: 1.15rem; }
+    p { color: #bdc9d4; line-height: 1.6; }
+    section { border: 1px solid #334454; background: #17232f; border-radius: 12px; padding: 20px; margin-top: 20px; }
+    .badge { background: #283e54; border-radius: 6px; padding: 6px 12px; }
+    #tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .tool { background: #1f2e3c; border: 1px solid #425568; border-left: 5px solid; border-radius: 8px; padding: 14px; }
+    .tool h3 { margin: 0 0 8px; } .tool p { margin: 5px 0; font-size: .9rem; }
+    .RUN { border-left-color: #44d49a; } .IDLE { border-left-color: #98a5b2; } .DOWN { border-left-color: #ff7474; }
+    #totals { margin-bottom: 16px; color: #bdc9d4; }
+    .error { min-height: 1.5em; margin: 8px 0; color: #ff9696; }
+    .bar { display: flex; gap: 4px; align-items: flex-end; min-height: 64px; margin: 14px 0; }
+    .pod { flex: 1; height: 44px; min-width: 3px; border-radius: 3px; }
+    #pod-counts { display: flex; flex-wrap: wrap; gap: 14px; font-size: .9rem; }
+    button { background: #314b63; border: 1px solid #688299; color: white; border-radius: 6px; padding: 10px 16px; cursor: pointer; }
+    button:hover { background: #426786; } button:disabled { opacity: .6; cursor: wait; }
+    #requests { display: flex; gap: 4px; align-items: flex-end; height: 110px; margin-top: 10px; }
+    .request { flex: 1; min-width: 3px; max-width: 34px; background: #44d49a; border-radius: 3px 3px 0 0; }
+    .request.failed { background: #ff7474; }
+    #request-labels { font-size: .9rem; color: #bdc9d4; }
+    #chaos-state { color: #a8d4ff; }
+    footer { margin: 20px 0; font-size: .85rem; color: #9fb2c3; }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>fab-monitor</h1><p>晶圓廠機台監控 · Docker Lab</p></div>
+    <span class="badge" id="version">版本：等待回應</span>
+  </header>
+  <section aria-labelledby="tools-title">
+    <div class="row"><h2 id="tools-title">機台看板</h2><span>每 2 秒更新</span></div>
+    <div id="tools-error" class="error" role="status"></div>
+    <div id="totals">等待機台資料…</div><div id="tools"></div>
+  </section>
+  <section aria-labelledby="pods-title">
+    <div class="row"><h2 id="pods-title">這次請求由哪個 Pod 處理</h2><span>每 1 秒請求 · 最近 30 次成功回應</span></div>
+    <p>Compose 階段只有一個 API 容器，名稱是 compose-api。把滑鼠移到色條可看名稱、節點與版本。</p>
+    <div id="pods-error" class="error" role="status"></div>
+    <div id="pods" class="bar" aria-label="最近 30 次 Pod 回應"></div><div id="pod-counts"></div>
+  </section>
+  <section aria-labelledby="chaos-title">
+    <h2 id="chaos-title">Chaos 控制區</h2>
+    <div class="row">
+      <button type="button" data-chaos="latency">加 500ms 延遲</button>
+      <button type="button" data-chaos="errors">20% 錯誤率</button>
+      <button type="button" data-chaos="clear">清除</button>
+    </div>
+    <p id="chaos-state">按鈕會取代此 API 程序目前的故障設定；重新啟動後清除。</p>
+    <div id="chaos-error" class="error" role="status"></div>
+    <p>最近 30 次資料請求：綠色為成功、紅色為失敗，高度代表延遲。滑鼠移到色條查看詳細資料。</p>
+    <div id="requests" aria-label="最近 30 次請求延遲與成功失敗"></div>
+    <p id="request-labels" aria-live="polite">等待請求…</p>
+  </section>
+  <footer>資料暫時無法取得時保留上次畫面，並在對應區塊顯示錯誤。</footer>
+  <script>
+    const byId = id => document.getElementById(id);
+    const requests = [], pods = [];
+    const colors = new Map();
+    const palette = ['#66b9ff', '#e5a4ff', '#ffce73', '#5fd6b2', '#ff9dba', '#abb3ff'];
+    const color = name => {
+      if (!colors.has(name)) colors.set(name, palette[colors.size % palette.length]);
+      return colors.get(name);
+    };
+    const node = (tag, text, className) => {
+      const el = document.createElement(tag);
+      if (text !== undefined) el.textContent = text;
+      if (className) el.className = className;
+      return el;
+    };
+    function record(path, ms, ok) {
+      requests.push({path, ms, ok});
+      if (requests.length > 30) requests.shift();
+      const max = Math.max(600, ...requests.map(r => r.ms));
+      byId('requests').replaceChildren(...requests.map(r => {
+        const bar = node('span', undefined, `request${r.ok ? '' : ' failed'}`);
+        bar.style.height = `${Math.max(5, r.ms / max * 100)}px`;
+        bar.title = `${r.path} · ${Math.round(r.ms)}ms · ${r.ok ? '成功' : '失敗'}`;
+        return bar;
+      }));
+      byId('request-labels').textContent = `最新：${path} ${Math.round(ms)}ms ${ok ? '成功' : '失敗'} · 失敗 ${requests.filter(r => !r.ok).length}/${requests.length}`;
+    }
+    async function api(path, options = {}, track = true) {
+      const start = performance.now();
+      let ok = false;
+      try {
+        const response = await fetch(path, {...options, cache: 'no-store', signal: AbortSignal.timeout(5000)});
+        if (!response.ok) throw new Error(`HTTP ${response.status}：${await response.text()}`);
+        const data = await response.json();
+        ok = true;
+        return data;
+      } finally {
+        if (track) record(path, performance.now() - start, ok);
+      }
+    }
+    async function pollTools() {
+      try {
+        const tools = await api('/api/tools');
+        byId('tools-error').textContent = '';
+        byId('totals').textContent = ['RUN', 'IDLE', 'DOWN'].map(s => `${s} ${tools.filter(t => t.status === s).length}`).join('　／　');
+        byId('tools').replaceChildren(...tools.map(t => {
+          const card = node('article', undefined, `tool ${t.status}`);
+          card.append(node('h3', t.id), node('strong', t.status),
+            node('p', `溫度 ${Number(t.temperature_c).toFixed(1)} °C`),
+            node('p', `Wafer ${t.wafer_count}`), node('p', `更新 ${new Date(t.updated_at).toLocaleTimeString()}`));
+          return card;
+        }));
+      } catch (error) {
+        byId('tools-error').textContent = `機台資料讀取失敗，保留上次結果：${error.message}`;
+      }
+    }
+    async function pollWhoami() {
+      try {
+        const pod = await api('/api/whoami');
+        byId('pods-error').textContent = '';
+        byId('version').textContent = `版本：${pod.version}`;
+        pods.push(pod);
+        if (pods.length > 30) pods.shift();
+        byId('pods').replaceChildren(...pods.map(p => {
+          const bar = node('span', undefined, 'pod');
+          bar.style.background = color(p.pod_name);
+          bar.title = `${p.pod_name} · ${p.node_name} · ${p.version}`;
+          return bar;
+        }));
+        const names = [...new Set(pods.map(p => p.pod_name))];
+        byId('pod-counts').replaceChildren(...names.map(name => {
+          const label = node('span', `${name}：${pods.filter(p => p.pod_name === name).length} 次`);
+          label.style.color = color(name);
+          return label;
+        }));
+      } catch (error) {
+        byId('pods-error').textContent = `Pod 資料讀取失敗：${error.message}`;
+      }
+    }
+    async function repeat(task, interval) {
+      // 慢請求尚未結束時不重疊發送，避免 Redis 中斷或 chaos 時堆積請求。
+      const start = performance.now();
+      await task();
+      setTimeout(() => repeat(task, interval), Math.max(0, interval - (performance.now() - start)));
+    }
+    document.querySelectorAll('[data-chaos]').forEach(button => button.addEventListener('click', async () => {
+      const buttons = document.querySelectorAll('[data-chaos]');
+      buttons.forEach(b => b.disabled = true);
+      const payload = {latency: {latency_ms: 500}, errors: {error_rate: 0.2}, clear: {}}[button.dataset.chaos];
+      try {
+        const data = await api('/api/chaos', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)}, false);
+        byId('chaos-error').textContent = '';
+        byId('chaos-state').textContent = `目前設定：延遲 ${data.latency_ms}ms，錯誤率 ${Math.round(data.error_rate * 100)}%`;
+      } catch (error) {
+        byId('chaos-error').textContent = `控制失敗：${error.message}`;
+      } finally {
+        buttons.forEach(b => b.disabled = false);
+      }
+    }));
+    repeat(pollTools, 2000);
+    repeat(pollWhoami, 1000);
+  </script>
+</body>
+</html>

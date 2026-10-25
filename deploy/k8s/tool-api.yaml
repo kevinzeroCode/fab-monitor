@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-api
+spec:
+  # 副本數是持續維持的目標，不是備份檔案，也不是節點數量。
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tool-api
+  # 先設定更新期間保留可用容量，滾動更新操作留到 D5。
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: tool-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      # 同一個 Node 故障不應讓所有 API 同時受影響；資源不足時仍允許排程。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: tool-api
+      containers:
+        - name: tool-api
+          image: fab/tool-api:v1
+          imagePullPolicy: IfNotPresent
+          # 短輪詢每次建立新連線，避免 HTTP keep-alive 長期固定到同一個 Pod，
+          # 讓本機看板可觀察多個 Pod 的分流；正式服務需另外評估連線成本。
+          command: ["uvicorn"]
+          args: ["app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-keep-alive", "0"]
+          envFrom:
+            - configMapRef:
+                name: fab-config
+          env:
+            - name: APP_VERSION
+              value: v1
+            # Downward API 讓每個 Pod 自己回報身分，不必在程式中呼叫管理 API。
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # liveness 只看程序，Redis 中斷時不應無意義地重啟所有 API。
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          # readiness 看依賴；失敗的 Pod 會暫時離開一般 Service 可用端點。
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tool-api
+spec:
+  type: NodePort
+  selector:
+    app: tool-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      # 對應 kind 的 30080 埠映射；後端 Pod 更換時主機入口保持不變。
+      nodePort: 30080

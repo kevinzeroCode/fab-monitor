@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-simulator
+spec:
+  # 單一寫入者避免兩份模擬器同時覆寫同一批機台資料。
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tool-simulator
+  template:
+    metadata:
+      labels:
+        app: tool-simulator
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: tool-simulator
+          image: fab/tool-simulator:v1
+          # 先由 make load 把本機映像載入 kind，不向公開 registry 尋找自訂 image。
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: fab-config
+                  key: REDIS_URL
+            - name: TOOL_COUNT
+              value: "12"
+            - name: TICK_SECONDS
+              value: "2"
+          ports:
+            - name: metrics
+              containerPort: 8081
+          resources:
+            requests:
+              cpu: 100m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          # Redis 中斷時由模擬器重試；不把外部依賴故障當成重啟程序的理由。
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tool-simulator
+spec:
+  # metrics 保留叢集內穩定入口，此時尚未部署 Prometheus。
+  selector:
+    app: tool-simulator
+  ports:
+    - name: metrics
+      port: 8081
+      targetPort: metrics

@@ -1,0 +1,77 @@
+# 固定專案名，確保在不同終端機仍能操作同一組容器。
+name: fab-monitor
+services:
+  redis:
+    # 明確固定 Redis 版本；資料僅供本機學習，關閉持久化。
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    # 維持官方映像的非 root 身分；內部 DNS 名稱 redis 取代固定 IP。
+    user: redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 3s
+    # Compose 的 reservations 對應資源保留，limits 限制上限；不是 K8s requests 語法。
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 32M
+        limits:
+          cpus: "0.50"
+          memory: 128M
+
+  tool-simulator:
+    image: fab/tool-simulator:${VERSION:-v1}
+    build:
+      # 從 repo 根目錄建置，讓根目錄 .dockerignore 對兩個映像都生效。
+      context: ../..
+      dockerfile: services/tool-simulator/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      TOOL_COUNT: "12"
+      TICK_SECONDS: "2"
+    depends_on:
+      # 等到 Redis 能回 PONG，再啟動寫入；執行期間仍由程式負責重試。
+      redis:
+        condition: service_healthy
+    ports:
+      # 只綁定本機，方便手動檢查 metrics。
+      - "127.0.0.1:8081:8081"
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 32M
+        limits:
+          cpus: "0.50"
+          memory: 128M
+
+  tool-api:
+    image: fab/tool-api:${VERSION:-v1}
+    build:
+      context: ../..
+      dockerfile: services/tool-api/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      # image tag 與畫面的版本一致，避免改 tag 卻忘了更新回傳版本。
+      APP_VERSION: ${VERSION:-v1}
+      POD_NAME: compose-api
+      NODE_NAME: docker-desktop
+      # 只在本機教學環境開啟，程式本身預設禁止 chaos。
+      CHAOS_ENABLED: "true"
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 64M
+        limits:
+          cpus: "0.50"
+          memory: 256M

@@ -1,0 +1,10 @@
+# kubectl 內建 Kustomize，集中組合資源，不必另外安裝模板工具。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: fab
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - redis.yaml
+  - tool-simulator.yaml
+  - tool-api.yaml

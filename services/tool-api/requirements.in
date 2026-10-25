@@ -1,0 +1,5 @@
+# 直接依賴固定版本；requirements.txt 另外固定間接依賴供 Docker 安裝。
+fastapi==0.115.12
+uvicorn==0.34.2
+redis==5.2.1
+prometheus-client==0.21.1

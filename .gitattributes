@@ -1,0 +1,2 @@
+# 統一換行，讓 Windows 編輯的 Makefile 與設定檔在 WSL 仍可使用。
+* text=auto eol=lf

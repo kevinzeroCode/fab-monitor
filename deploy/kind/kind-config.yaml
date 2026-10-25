@@ -1,0 +1,23 @@
+# kind 讀取的叢集設定，不是用 kubectl apply 部署的應用資源。
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  # 管理 API 只開放本機；實際管理埠由 kind 選擇，避免固定埠衝突。
+  apiServerAddress: "127.0.0.1"
+nodes:
+  # 管理節點協調叢集；節點 image 與使用者 kubectl 保持 1.34 次版本一致。
+  # 版本與 digest 取自 kind v0.33.0 官方 release，避免同一 tag 指向不同內容。
+  - role: control-plane
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d
+    extraPortMappings:
+      # 預留後續 API NodePort 入口；containerPort 必須與未來 nodePort 相同。
+      # 目前只建叢集，尚未部署 API，所以這時 30080 不會顯示看板。
+      - containerPort: 30080
+        hostPort: 30080
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+  # 兩個工作節點用來練習應用分佈；kind 用容器模擬節點，不需要三台電腦。
+  - role: worker
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d
+  - role: worker
+    image: kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d

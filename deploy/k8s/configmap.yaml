@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fab-config
+data:
+  # 同 namespace 使用 Service 名稱，不把會變動的 Pod IP 寫死。
+  REDIS_URL: redis://redis:6379/0
+  # 僅本機練習開啟；API 程式本身預設禁止故障注入。
+  CHAOS_ENABLED: "true"
