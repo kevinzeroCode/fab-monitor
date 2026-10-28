@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Helm 先建立 monitoring namespace 與 CRD，再套用這組自訂資源。
+namespace: monitoring
+resources:
+  - servicemonitors.yaml
+configMapGenerator:
+  - name: fab-dashboard
+    files:
+      - fab-monitor.json=dashboard.json
+    options:
+      # Grafana dashboard sidecar 依標籤自動載入，不必手動貼 JSON。
+      labels:
+        grafana_dashboard: '1'
+generatorOptions:
+  # Sidecar 會 watch ConfigMap 更新；固定名稱避免每次更改留下舊 dashboard。
+  disableNameSuffixHash: true

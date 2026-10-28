@@ -61,8 +61,11 @@ apiVersion: v1
 kind: Service
 metadata:
   name: tool-simulator
+  labels:
+    # 供 Phase 3 的 ServiceMonitor 找到 metrics Service。
+    app: tool-simulator
 spec:
-  # metrics 保留叢集內穩定入口，此時尚未部署 Prometheus。
+  # metrics 保留叢集內入口，供 Prometheus 探索單一模擬器。
   selector:
     app: tool-simulator
   ports:

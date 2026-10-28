@@ -5,10 +5,12 @@ metadata:
 spec:
   # 副本數是持續維持的目標，不是備份檔案，也不是節點數量。
   replicas: 2
+  # 新 Pod Ready 後再穩定五秒才算 Available，便於觀察並保留舊版服務容量。
+  minReadySeconds: 5
   selector:
     matchLabels:
       app: tool-api
-  # 先設定更新期間保留可用容量，滾動更新操作留到 D5。
+  # 更新時先建立新副本、保留舊版可用容量，再逐步替換。
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -19,6 +21,8 @@ spec:
       labels:
         app: tool-api
     spec:
+      # 包含 preStop 與 uvicorn 收尾時間，讓進行中的請求有機會正常完成。
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -64,6 +68,11 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+          lifecycle:
+            preStop:
+              exec:
+                # Pod 終止時先留出端點更新時間，再由 uvicorn 收到 SIGTERM 收尾。
+                command: ["python", "-c", "import time; time.sleep(5)"]
           # liveness 只看程序，Redis 中斷時不應無意義地重啟所有 API。
           livenessProbe:
             httpGet:
@@ -90,6 +99,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: tool-api
+  labels:
+    # ServiceMonitor 依 Service 標籤探索各 API Pod 的 metrics。
+    app: tool-api
 spec:
   type: NodePort
   selector:

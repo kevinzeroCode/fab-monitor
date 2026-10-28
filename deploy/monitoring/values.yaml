@@ -1,0 +1,158 @@
+# 對應 Makefile 固定的 kube-prometheus-stack 92.14.1；不是跨版本通用的 values。
+fullnameOverride: fab-monitor
+# D7 先看原始 metrics，避免預設規則引入尚未教學的告警與額外負擔。
+defaultRules:
+  create: false
+alertmanager:
+  enabled: false
+# 本機先聚焦應用，不抓 kind 管理元件或每個節點的完整指標。
+kubeApiServer:
+  enabled: false
+kubelet:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+coreDns:
+  enabled: false
+kubeDns:
+  enabled: false
+nodeExporter:
+  enabled: false
+windowsMonitoring:
+  enabled: false
+thanosRuler:
+  enabled: false
+
+prometheusOperator:
+  # 已停用 webhook／憑證 Job，須同步停用 Operator 自身 TLS，
+  # 否則 chart 仍會掛載不存在的 fab-monitor-admission Secret 而 FailedMount。
+  tls:
+    enabled: false
+  # 學習環境先不啟用 webhook／憑證 Job；D8 仍須離線檢查 rules。
+  admissionWebhooks:
+    enabled: false
+    patch:
+      enabled: false
+  kubeletService:
+    enabled: false
+  image:
+    tag: v0.94.2
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 300m, memory: 192Mi}
+  prometheusConfigReloader:
+    # Operator 建立的 Prometheus init／sidecar 容器也要有資源預算。
+    image:
+      tag: v0.94.2
+    resources:
+      requests: {cpu: 10m, memory: 16Mi}
+      limits: {cpu: 100m, memory: 64Mi}
+
+kubeStateMetrics:
+  enabled: true
+kube-state-metrics:
+  # 留給 D8 判斷 Pod Ready；只收 fab 的 Pod／Deployment 狀態。
+  fullnameOverride: fab-kube-state-metrics
+  image:
+    tag: v2.20.0
+  namespaces: [fab]
+  collectors: [pods, deployments]
+  resources:
+    requests: {cpu: 30m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 96Mi}
+
+prometheus:
+  prometheusSpec:
+    image:
+      tag: v3.15.1-distroless
+    replicas: 1
+    # 短保留期與磁碟上限節省筆電資源；不是正式的 30 天 SLO 儲存。
+    retention: 6h
+    retentionSize: 256MiB
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    resources:
+      requests: {cpu: 200m, memory: 256Mi}
+      limits: {cpu: '1', memory: 768Mi}
+    # 使用 emptyDir：Pod 重建會失去歷史，能由程式重新產生資料即可。
+    storageSpec:
+      emptyDir:
+        sizeLimit: 1Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector:
+      matchLabels:
+        release: fab-monitor
+    # 只從 monitoring 找 ServiceMonitor，再由其 namespaceSelector 找 fab 的 Service。
+    serviceMonitorNamespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+    # D7 無自訂規則，預先限定 D8 規則標籤以免誤收其他練習資源。
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector:
+      matchLabels:
+        release: fab-monitor
+    ruleNamespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+
+grafana:
+  fullnameOverride: fab-grafana
+  image:
+    tag: 13.2.4-distroless
+  # 本次只用自己的 dashboard，不下載大量叢集預設 dashboard。
+  defaultDashboardsEnabled: false
+  testFramework:
+    enabled: false
+  persistence:
+    enabled: false
+  initChownData:
+    enabled: false
+  resources:
+    # 主容器在登入／載入介面時曾以 256Mi 上限 OOMKilled；
+    # 提高到 512Mi 後仍須實際開啟 dashboard 並觀察重啟數，不只看啟動 Ready。
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  adminUser: admin
+  adminPassword: ''
+  # 不寫死密碼；由 chart 建立 Secret，make grafana 只在本機終端機顯示。
+  sidecar:
+    image:
+      tag: 2.14.1
+    resources:
+      # 實測 96Mi 會 OOMKilled；提高啟動與 watch 預算，並保留明確上限。
+      requests: {cpu: 10m, memory: 64Mi}
+      limits: {cpu: 100m, memory: 256Mi}
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: '1'
+      searchNamespace: monitoring
+      resource: configmap
+    datasources:
+      # Datasource 直接由檔案提供，少跑一個持續 watch 的 sidecar。
+      enabled: false
+      defaultDatasourceEnabled: false
+      alertmanager:
+        enabled: false
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          uid: prometheus
+          type: prometheus
+          access: proxy
+          url: http://fab-monitor-prometheus.monitoring.svc.cluster.local:9090
+          isDefault: true
+          editable: false
+  grafana.ini:
+    analytics:
+      check_for_updates: false
+      check_for_plugin_updates: false
+      reporting_enabled: false

@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # 與 base 分開放置，避免引用包含本 overlay 的祖先目錄而被判定循環。
+  - ../../k8s
+images:
+  # D7 真正新增指標，使用新的 tag，避免重建 v1 後仍沿用節點舊快取。
+  - name: fab/tool-api
+    newTag: v3
+  - name: fab/tool-simulator
+    newTag: v3
+patches:
+  - target:
+      kind: Deployment
+      name: tool-api
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: tool-api
+      spec:
+        template:
+          spec:
+            containers:
+              - name: tool-api
+                env:
+                  # image 與顯示版本在同一份 apply 模板更新，維持 D5 的做法。
+                  - name: APP_VERSION
+                    value: v3

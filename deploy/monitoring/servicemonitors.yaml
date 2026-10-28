@@ -1,0 +1,41 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tool-api
+  labels:
+    # 必須符合 Prometheus 的選取條件；存在 ServiceMonitor 不代表已被收集。
+    release: fab-monitor
+spec:
+  jobLabel: app
+  namespaceSelector:
+    matchNames: [fab]
+  selector:
+    # 這裡選的是 Service 的 metadata.labels，不是 Deployment 的名稱。
+    matchLabels:
+      app: tool-api
+  endpoints:
+    # 指定 Service port 的名稱；Prometheus 會發現每一個 Pod，而非只抓 NodePort。
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tool-simulator
+  labels:
+    release: fab-monitor
+spec:
+  jobLabel: app
+  namespaceSelector:
+    matchNames: [fab]
+  selector:
+    matchLabels:
+      app: tool-simulator
+  endpoints:
+    # simulator 只有一個實例；它的數量代表機台數，不是 API 副本數。
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s

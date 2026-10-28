@@ -4,6 +4,7 @@ import random
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -46,7 +47,7 @@ def decode_tool(data: dict) -> dict:
             "wafer_count": int(data["wafer_count"])}
 
 
-def create_app(settings: Settings | None = None, redis_client=None) -> FastAPI:
+def create_app(settings: Settings | None = None, redis_client=None, clock=time.time) -> FastAPI:
     settings = settings or Settings.from_env()
     cache = redis_client if redis_client is not None else Redis.from_url(
         settings.redis_url, decode_responses=True,
@@ -77,6 +78,7 @@ def create_app(settings: Settings | None = None, redis_client=None) -> FastAPI:
     Gauge("tool_api_info", "Application identity", ["version", "pod"], registry=registry).labels(
         version=settings.version, pod=settings.pod_name,
     ).set(1)
+    data_age = Gauge("tool_data_age_seconds", "Age of the oldest tool update; NaN if unknown", registry=registry)
 
     @app.middleware("http")
     async def measure(request: Request, call_next):
@@ -135,6 +137,26 @@ def create_app(settings: Settings | None = None, redis_client=None) -> FastAPI:
 
     @app.get("/metrics")
     async def metrics():
+        # 每次 scrape 都重新讀取，才能在沒有使用者流量時發現 simulator 停更。
+        # 讀不到資料代表未知；不能把舊的健康值或 0 秒當成本次結果。
+        age = float("nan")
+        try:
+            async with asyncio.timeout(2):
+                timestamps = []
+                async for key in cache.scan_iter(match="tool:*"):
+                    data = await cache.hgetall(key)
+                    if not data:  # SCAN 後 key 可能被刪除，略過已不存在的資料。
+                        continue
+                    updated = datetime.fromisoformat(data["updated_at"])
+                    if updated.tzinfo is None:
+                        raise ValueError("updated_at must include a timezone")
+                    timestamps.append(updated.timestamp())
+                if timestamps:
+                    age = max(0, clock() - min(timestamps))
+        except (RedisError, TimeoutError, ValueError, TypeError, KeyError, OverflowError):
+            # 保留 HTTP metrics 供排錯，Redis 故障不應讓整個 scrape 消失。
+            pass
+        data_age.set(age)
         return Response(generate_latest(registry), headers={"Content-Type": CONTENT_TYPE_LATEST})
 
     @app.get("/", response_class=HTMLResponse)
