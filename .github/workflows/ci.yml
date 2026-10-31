@@ -78,6 +78,8 @@ jobs:
     permissions:
       packages: write
     strategy:
+      # 兩個 image 共用 Python base layer；第一次 run 同時推送時 tool-api 卡在上傳，改成一次推一個。
+      max-parallel: 1
       matrix:
         service: [tool-api, tool-simulator]
     env:
