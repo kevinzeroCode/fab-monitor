@@ -72,10 +72,14 @@ jobs:
     # PR 只驗證不發佈：還沒 review 的程式不該變成可部署的 image。
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    # 推送卡住時盡快失敗；不設定的話要等預設的 6 小時。
+    timeout-minutes: 10
     # job 層級的 permissions 會取代頂層設定，所以這裡是整個 workflow 唯一能寫 packages 的地方。
     permissions:
       packages: write
     strategy:
+      # 兩個 image 共用 Python base layer；第一次 run 同時推送時 tool-api 卡在上傳，改成一次推一個。
+      max-parallel: 1
       matrix:
         service: [tool-api, tool-simulator]
     env:

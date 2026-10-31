@@ -143,3 +143,7 @@ def test_dashboard_is_self_contained(client):
     assert "text/html" in response.headers["content-type"]
     assert all(path in response.text for path in ["/api/tools", "/api/whoami", "/api/chaos"])
     assert '<script src=' not in response.text
+
+
+def test_health_body_is_exact(client):
+    assert client.get("/health").json() == {"status": "ok"}
