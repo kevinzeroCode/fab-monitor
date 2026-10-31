@@ -70,4 +70,4 @@ Push 到 GHCR 用 GitHub 自動發放的 `GITHUB_TOKEN`，它在每次 run 開�
 - `timeout-minutes: 10`：卡住時盡快失敗，而不是等預設的 6 小時
 - `max-parallel: 1`：兩個 image 共用 Python base layer，改成一次推一個
 
-修正後 `tool-api` 18 秒推完。**同時推送是否為根因沒有被證實**，目前只成功驗證過一次。
+修正後 `tool-api` 18 秒推完，之後的 run 也成功。**同時推送是否為根因沒有被證實**，只知道改成序列後沒有再發生。
