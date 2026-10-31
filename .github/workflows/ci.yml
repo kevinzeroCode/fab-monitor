@@ -1,0 +1,102 @@
+name: ci
+
+on:
+  # push 只限 main：PR 分支已由 pull_request 觸發，兩個都開同一個 commit 會跑兩次。
+  push:
+    branches: [main]
+  pull_request:
+
+# 最小權限：預設只能讀程式碼，需要更多權限的 job 再自己宣告。
+permissions:
+  contents: read
+
+env:
+  # GHCR 的 image 名稱必須全小寫；GitHub 帳號有大寫，所以不用 github.repository_owner。
+  IMAGE_PREFIX: ghcr.io/kevinzerocode/fab-monitor
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      # 第三方 Action 鎖完整 commit SHA：tag 可以被移動，SHA 不行。註解保留對應版本方便閱讀。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          # 與 Dockerfile 相同版本，避免測試和正式 image 跑在不同 Python 上。
+          python-version: "3.12.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: make lint
+
+  test:
+    # needs 決定順序：lint 失敗就不跑測試，也不會往下 build。
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: make test
+
+  build:
+    # 測試放在 build 之前：測試快又便宜，失敗時不必浪費時間建 image。
+    needs: test
+    runs-on: ubuntu-24.04
+    strategy:
+      # matrix 用同一份步驟跑兩個服務，不必把 job 複製兩次。
+      matrix:
+        service: [tool-api, tool-simulator]
+    env:
+      SERVICE: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # build context 是 repo 根目錄，根目錄的 .dockerignore 才會生效，與 Compose 相同。
+      - run: docker build --file "services/$SERVICE/Dockerfile" --tag "$SERVICE:$GITHUB_SHA" .
+      # 每個 job 都在全新的機器上跑，image 不會留到下一個 job，要存成檔案傳過去。
+      - run: docker save --output image.tar "$SERVICE:$GITHUB_SHA"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ matrix.service }}
+          path: image.tar
+          if-no-files-found: error
+          # 只是 job 之間的暫存，正式保存的地方是 GHCR。
+          retention-days: 1
+
+  push:
+    needs: build
+    # PR 只驗證不發佈：還沒 review 的程式不該變成可部署的 image。
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # job 層級的 permissions 會取代頂層設定，所以這裡是整個 workflow 唯一能寫 packages 的地方。
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        service: [tool-api, tool-simulator]
+    env:
+      SERVICE: ${{ matrix.service }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-${{ matrix.service }}
+      - run: docker load --input image.tar
+      # GITHUB_TOKEN 由 GitHub 在每次 run 自動發放、結束就失效，repo 不必存任何長期金鑰。
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # 推的是 build job 建好的同一份 image，不重新建置，避免發佈的內容和驗證過的不同。
+      # short SHA 能對回確切的 commit，出事時知道跑的是哪一版；latest-main 只是方便人看，會被覆蓋。
+      - name: Push image
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          for tag in "$short_sha" latest-main; do
+            docker tag "$SERVICE:$GITHUB_SHA" "$IMAGE_PREFIX/$SERVICE:$tag"
+            docker push "$IMAGE_PREFIX/$SERVICE:$tag"
+          done

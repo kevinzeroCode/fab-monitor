@@ -2,6 +2,8 @@
 -r services/tool-api/requirements.in
 -r services/tool-simulator/requirements.in
 pytest==8.3.5
+# 固定 lint 版本：新版 ruff 可能新增規則，不能讓 CI 在程式沒變時突然變紅。
+ruff==0.15.10
 fakeredis==2.28.1
 httpx==0.28.1
 # 壓測在計時前初始化 HTTP client 的 async backend；既有 lock 已固定相同版本。

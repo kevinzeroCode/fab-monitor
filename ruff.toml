@@ -1,0 +1,3 @@
+# 先用 ruff 預設規則，不一次開太嚴；之後要加規則再逐條評估。
+# 與 Dockerfile 的 Python 3.12 一致，語法檢查才符合實際執行環境。
+target-version = "py312"

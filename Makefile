@@ -17,7 +17,7 @@ export KIND_EXPERIMENTAL_PROVIDER = docker
 MONITORING_CHART_VERSION := 92.14.1
 RPS ?= 20
 
-.PHONY: help build up down logs test ps cluster cluster-down load load-images deploy deploy-observability status watch scale kill-pod rollout rollback break-redis fix-redis monitoring grafana prometheus chaos-latency chaos-errors chaos-clear
+.PHONY: help build up down logs test ps cluster cluster-down load load-images deploy deploy-observability status watch scale kill-pod rollout rollback break-redis fix-redis monitoring grafana prometheus chaos-latency chaos-errors chaos-clear lint
 .DEFAULT_GOAL := help
 
 help:
@@ -54,6 +54,8 @@ help:
 	@echo "  make chaos-latency       Add 500ms latency on every API pod"
 	@echo "  make chaos-errors        Fail 20% of API requests on every API pod"
 	@echo "  make chaos-clear         Clear injected faults on every API pod"
+	@echo "Phase 4 - CI/CD"
+	@echo "  make lint [PYTHON=python] Run ruff (same check as CI)"
 
 build:
 	$(COMPOSE) build tool-api tool-simulator
@@ -69,6 +71,9 @@ logs:
 
 test:
 	$(PYTHON) -m pytest
+
+lint:
+	$(PYTHON) -m ruff check .
 
 ps:
 	$(COMPOSE) ps
