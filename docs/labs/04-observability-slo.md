@@ -6,7 +6,7 @@
 - 使用固定速率壓測，觀察流量、錯誤、延遲、Pod 分流與短窗 SLI。
 - 分開驗證 HTTP 成功與機台資料仍在更新。
 
-D7 的實作與操作驗收已完成，結果見文件末尾；現在停下等使用者確認 D8。D8 的 SLO 文件、recording rules、PrometheusRule、runbook 與故障驗收尚未實作，不要現在停止 simulator。這是完整手冊；對話中一次只操作一個步驟。
+D7 的實作與操作驗收已完成，結果見「D7 驗收紀錄」。D8 的演練紀錄見文件末尾「D8 驗收紀錄」。
 
 ## 2. 架構圖
 
@@ -293,3 +293,48 @@ Ctrl+C 只停止各終端機 port-forward，Pod 仍運作。記錄驗收後停�
 
 參考：[固定 chart](https://github.com/prometheus-community/helm-charts/blob/kube-prometheus-stack-92.14.1/charts/kube-prometheus-stack/Chart.yaml)、[固定 values](https://github.com/prometheus-community/helm-charts/blob/kube-prometheus-stack-92.14.1/charts/kube-prometheus-stack/values.yaml)、[ServiceMonitor](https://prometheus-operator.dev/docs/developer/getting-started/)、[Prometheus 函式](https://prometheus.io/docs/prometheus/latest/querying/functions/)、[Grafana provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/)。
 
+
+## D8 驗收紀錄
+
+SLI 的 route 收窄為 `/api/tools.*`，原因見 [docs/slo.md](../slo.md)。規則套用前已用 promtool 檢查，並用模擬資料測試全 5xx、無流量、NaN 等情境；模擬資料不算驗收，以下才是實際結果。
+
+規則：2026-10-31 套用後，Rule health 的 `fab-slo` 群組 6 條規則全部 ok，20 RPS／60 秒壓測 1200 筆全 200。
+
+### 演練 1：ToolApiHighErrorRate
+
+指令：終端機 1 `make load S=600 RPS=20 PYTHON=.cache/venv-wsl/bin/python`；終端機 2 `sleep 60; date +%T; make chaos-errors; sleep 180; date +%T; make chaos-clear`。壓測收到 500 時 make 顯示 Error 1 是預期結果。
+
+| 次數 | 注入 | Pending | Firing | 清除 | 解除 | SLI 最低 | 結論 |
+|---|---|---|---|---|---|---|---|
+| 第 1 次 | 10:05:02 | 10:05:26 | 10:06:26 | 10:47:13 | 約 10:24 消失 | 79.6% | **假恢復**，不算解除 |
+| 第 2 次 | 10:52:41 | 10:53:00 | 約 10:54:00 | 10:55:37 | 未量到 | 86.2% | 10:59 起 Prometheus 中斷，**不算** |
+| 第 3 次 | 14:28:00 | 14:28:25 | 約 14:29:25 | 14:30:52 | 14:35:58 | 85.3% | **通過** |
+
+第 3 次解除時流量約 21 RPS、SLI 99.6%，是真的恢復。清除到解除 5 分 06 秒。Firing 時間由 `for: 1m` 推算，輪詢在 14:29:42 觀察到。
+
+**第 1 次的假恢復**：壓測約 10:19 結束時 chaos 還開著。約 5 分鐘後窗內沒有請求，SLI 變 NaN，告警消失，但故障要到 10:47 才清除。告警消失不等於恢復，判斷恢復要確認當時有流量。
+
+**第 2 次的中斷**：Prometheus 在 10:59 到 14:24 沒有資料，SLI 卡在 93.58% 是沿用最後一筆。電腦休眠是推測，沒有直接證據。
+
+**機制**：`for: 1m` 要求條件連續成立 1 分鐘，所以先 Pending 再 Firing，用來過濾抖動。Firing 不用等滿 5 分鐘窗：少量錯誤就足以讓 SLI 跌破 99%。清除後要等舊錯誤滑出窗口，所以恢復比實際晚約 5 分鐘。
+
+### 演練 2：ToolDataStale
+
+指令：`kubectl --context kind-fab -n fab scale deployment/tool-simulator --replicas=0`，排查後 `--replicas=1`。
+
+| 事件 | 時間 |
+|---|---|
+| Redis 最後一次更新 | 15:41:49 |
+| Pending | 15:42:42 |
+| Firing | 15:44:42（Pending 後 2 分鐘，符合 `for: 2m`） |
+| scale 回 1 | 16:15:15 |
+| 資料年齡降回 1.3 秒 | 16:15:37 前（scale 前 2006 秒，約 33 分鐘） |
+| 告警解除 | 16:15:37 到 16:15:52 之間（16:15:37 是最後一筆 Firing） |
+
+Firing 期間：`/api/tools/ETCH-01` 回得到資料，`updated_at` 停在 07:41:49（UTC）；可用性 SLI 為 100%、流量約 21 RPS，`ToolApiHighErrorRate` 沒有觸發。
+
+使用者照 runbook 四站排查：deployment `0/0`、沒有 Pod；`logs` 回 `timed out waiting for the condition`；Redis 和 API 的 `updated_at` 相同且都舊。根因是 simulator 被 scale 到 0，**Redis 和 API 本身正常**，只是拿到舊資料。
+
+恢復時壓測已結束（SLI 為 NaN），但新鮮度不靠流量：資料年齡是實際數字 0.3 秒，所以是真的恢復。這條告警看當下年齡，不是 5 分鐘平均，恢復約 30 秒內解除；演練 1 則要等舊錯誤滑出窗口，需要 5 分 06 秒。
+
+**D8／Phase 3b 兩次演練已實際驗收。** `ToolApiSlowResponses`、`ToolApiPodNotReady` 只確認規則載入，沒有演練。

@@ -12,17 +12,19 @@ flowchart LR
     grafana[Grafana :3000] -->|PromQL 查詢與圖表| prometheus
 ```
 
-**Phase 1、Phase 2 與 Phase 3a／D7 的實作及操作驗收已完成，停在 D7／D8 確認點。** 容器與叢集結果由使用者在 WSL 執行並回報；D7 的歷史 SLI／budget 另由代理透過本機 Prometheus 唯讀查詢核對，證據見 Lab 04。API 在 Compose 顯示 compose-api，Kubernetes 則由 Downward API 回報實際 Pod／節點名稱。
+**Phase 1、Phase 2 與 Phase 3 的實作及操作驗收已完成。** 容器與叢集結果由使用者在 WSL 執行並回報；D7 的歷史 SLI／budget 另由代理透過本機 Prometheus 唯讀查詢核對，證據見 Lab 04。API 在 Compose 顯示 compose-api，Kubernetes 則由 Downward API 回報實際 Pod／節點名稱。
 
 | Phase | 進度 |
 | --- | --- |
 | 1：Docker、服務、網頁、測試、Lab | 使用者已回報看板、故障恢復與 27 項測試通過 |
 | 2：Kubernetes | 已完成：叢集、部署、擴充、自我修復、更新／回滾、探針與設定來源核對（使用者回報） |
-| 3：監控、SLI/SLO、告警 | 3a／D7 完成：57 項測試、1200/1200 全 200／零略過、targets／圖表與短窗 SLI 驗證；3b／D8 未開始，等使用者確認 |
+| 3：監控、SLI/SLO、告警 | 3a／D7 完成：1200/1200 全 200／零略過、targets／圖表與短窗 SLI 驗證；3b／D8 完成：62 項測試、[SLO](docs/slo.md)、[runbook](docs/runbook.md)、錯誤率與資料新鮮度兩次告警演練 |
 | 4：CI/CD | 未開始 |
 | 5：GitOps（選做） | 未開始 |
 
-D6 紀錄與補強題見 [D6 交接](docs/notes/d6-review.md)。D7 已驗證 v3、監控安裝、三個應用 targets UP、新鮮度與十個 Grafana 面板；完整測試 57 passed，20 RPS／60 秒 1200 筆全 200、零 dropped，Grafana 操作後 89 分鐘零重啟。歷史有效樣本的可用性、300ms 延遲 SLI 及短窗 budget 剩餘均為 100%，無流量時不當成達標。完整結果與故障排查見 [Lab 04](docs/labs/04-observability-slo.md)。依使用者指定在此停止，確認後才進 D8 的 SLO、告警、runbook 與故障驗收。
+D6 紀錄與補強題見 [D6 交接](docs/notes/d6-review.md)。D7 已驗證 v3、監控安裝、三個應用 targets UP、新鮮度與十個 Grafana 面板；完整測試 57 passed，20 RPS／60 秒 1200 筆全 200、零 dropped，Grafana 操作後 89 分鐘零重啟。歷史有效樣本的可用性、300ms 延遲 SLI 及短窗 budget 剩餘均為 100%，無流量時不當成達標。完整結果與故障排查見 [Lab 04](docs/labs/04-observability-slo.md)。
+
+D8 實測：注入 20% 錯誤後 25 秒 Pending、再 1 分鐘 Firing，清除後 5 分 06 秒解除；simulator 停止時可用性維持 100%，`ToolDataStale` 仍觸發，恢復後約 30 秒內解除。第一次演練曾遇到壓測先結束、SLI 變 NaN 而告警消失的假恢復，已記錄在 Lab 04。延遲與 Pod 不 Ready 兩條告警只確認規則載入，未實際演練。
 
 ## 已知限制與改進方向
 
@@ -102,4 +104,4 @@ D5 使用 `make rollout V=v2` 依序建置、載入，再以單次 Pod template 
 
 D7 先測試，再以 `make build VERSION=v3`、`make load-images VERSION=v3`、`make deploy-observability` 更新真正新增指標的兩個服務。接著渲染固定 Helm chart、`make monitoring` 安裝；`make prometheus`／`make grafana` 分別開啟本機入口，`make load S=60 RPS=20 PYTHON=.cache/venv-wsl/bin/python` 壓測。對話中一次只跑一個步驟，完整預期與原因見 Lab 04。
 
-注意 `make load` 的歷史命名衝突：明確傳 `S` 才跑壓測，否則保留原本 image 匯入行為；內部 rollout 工具使用 `load-images` 避免參數誤判。D7 使用獨立 overlay，舊 `make deploy` 仍會回到 v1。監控記憶體 requests 約 688 MiB、limits 約 1888 MiB，不含 app／叢集；Prometheus 資料不是永久儲存。D8 的告警與 runbook 尚未開始。
+注意 `make load` 的歷史命名衝突：明確傳 `S` 才跑壓測，否則保留原本 image 匯入行為；內部 rollout 工具使用 `load-images` 避免參數誤判。D7 使用獨立 overlay，舊 `make deploy` 仍會回到 v1。監控記憶體 requests 約 688 MiB、limits 約 1888 MiB，不含 app／叢集；Prometheus 資料不是永久儲存。D8 用 `kubectl --context kind-fab apply -k deploy/monitoring` 套用告警，用 `make chaos-errors`／`make chaos-latency`／`make chaos-clear` 演練。

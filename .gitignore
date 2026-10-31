@@ -7,3 +7,5 @@ __pycache__/
 .env.*
 !.env.example
 kind-logs/
+# 個人交接筆記含面試時程，只留在本機。
+docs/notes/d8-d9-handoff.md
