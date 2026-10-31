@@ -186,6 +186,8 @@ flowchart LR
 
 ## Phase 5（選做）：GitOps with ArgoCD
 
+**不做。** 2026-10-31 決定在 Phase 4 收尾，以下內容僅保留原規劃。
+
 - 在 kind 安裝 ArgoCD，建立一個 `Application` 指向這個 repo 的 `deploy/k8s`
 - **驗收**：只在 Git 改 replica 數並 push，ArgoCD 自動同步，叢集 pod 數跟著變；手動 `kubectl scale` 後 ArgoCD 會把它改回 Git 的狀態
 - Lab 文件：`docs/labs/06-gitops-argocd.md`，說明 push-based CD 和 GitOps 的差別

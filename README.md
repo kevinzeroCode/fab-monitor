@@ -12,15 +12,15 @@ flowchart LR
     grafana[Grafana :3000] -->|PromQL 查詢與圖表| prometheus
 ```
 
-**Phase 1、Phase 2 與 Phase 3 的實作及操作驗收已完成。** 容器與叢集結果由使用者在 WSL 執行並回報；D7 的歷史 SLI／budget 另由代理透過本機 Prometheus 唯讀查詢核對，證據見 Lab 04。API 在 Compose 顯示 compose-api，Kubernetes 則由 Downward API 回報實際 Pod／節點名稱。
+**Phase 1 到 Phase 4 的實作及操作驗收已完成，專案在此收尾。** 容器與叢集結果由使用者在 WSL 執行並回報；D7 的歷史 SLI／budget 另由代理透過本機 Prometheus 唯讀查詢核對，證據見 Lab 04。API 在 Compose 顯示 compose-api，Kubernetes 則由 Downward API 回報實際 Pod／節點名稱。
 
 | Phase | 進度 |
 | --- | --- |
 | 1：Docker、服務、網頁、測試、Lab | 使用者已回報看板、故障恢復與 27 項測試通過 |
 | 2：Kubernetes | 已完成：叢集、部署、擴充、自我修復、更新／回滾、探針與設定來源核對（使用者回報） |
 | 3：監控、SLI/SLO、告警 | 3a／D7 完成：1200/1200 全 200／零略過、targets／圖表與短窗 SLI 驗證；3b／D8 完成：62 項測試、[SLO](docs/slo.md)、[runbook](docs/runbook.md)、錯誤率與資料新鮮度兩次告警演練 |
-| 4：CI/CD | 未開始 |
-| 5：GitOps（選做） | 未開始 |
+| 4：CI/CD | 完成：[pipeline](docs/cicd.md)、63 項測試、PR 紅 → 綠 → merge、GHCR 發佈 image，見 [Lab 05](docs/labs/05-cicd.md) |
+| 5：GitOps（選做） | 不做 |
 
 D6 紀錄與補強題見 [D6 交接](docs/notes/d6-review.md)。D7 已驗證 v3、監控安裝、三個應用 targets UP、新鮮度與十個 Grafana 面板；完整測試 57 passed，20 RPS／60 秒 1200 筆全 200、零 dropped，Grafana 操作後 89 分鐘零重啟。歷史有效樣本的可用性、300ms 延遲 SLI 及短窗 budget 剩餘均為 100%，無流量時不當成達標。完整結果與故障排查見 [Lab 04](docs/labs/04-observability-slo.md)。
 
