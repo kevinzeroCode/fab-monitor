@@ -146,5 +146,4 @@ def test_dashboard_is_self_contained(client):
 
 
 def test_health_body_is_exact(client):
-    # 步驟 9 故意寫錯的預期值，用來確認 CI 會擋下失敗的測試。
-    assert client.get("/health").json() == {"status": "broken"}
+    assert client.get("/health").json() == {"status": "ok"}
