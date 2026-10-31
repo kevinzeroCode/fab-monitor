@@ -92,7 +92,7 @@ prometheus:
     serviceMonitorNamespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: monitoring
-    # D7 無自訂規則，預先限定 D8 規則標籤以免誤收其他練習資源。
+    # 只載入帶此標籤的 PrometheusRule（deploy/monitoring/rules.yaml），以免誤收其他練習資源。
     ruleSelectorNilUsesHelmValues: false
     ruleSelector:
       matchLabels:

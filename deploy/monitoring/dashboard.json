@@ -226,7 +226,7 @@
     {
       "id": 5,
       "title": "可用性 SLI（5 分鐘）／目標 99%",
-      "description": "請求非 5xx 的比例；目標線不是「這個短窗已證明 30 天 SLO」。D8 再建立 recording rules。",
+      "description": "資料端點（/api/tools*）請求非 5xx 的比例；目標線不是「這個短窗已證明 30 天 SLO」。查 recording rule，與告警同一份定義。",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -280,7 +280,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(1 - (sum(rate(http_requests_total{namespace=\"fab\",job=\"tool-api\",route=~\"/api/.*\",code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_requests_total{namespace=\"fab\",job=\"tool-api\",route=~\"/api/.*\"}[5m])))",
+          "expr": "fab:sli_availability:ratio_rate5m",
           "legendFormat": "availability",
           "datasource": {
             "type": "prometheus",
@@ -292,7 +292,7 @@
     {
       "id": 6,
       "title": "延遲 SLI（5 分鐘）／目標 95%",
-      "description": "所有 /api/* 回應中，在 300ms 內完成的比例；含 HTTP 失敗回應，與可用性分開計算。",
+      "description": "資料端點（/api/tools*）回應中，在 300ms 內完成的比例；含 HTTP 失敗回應，與可用性分開計算。查 recording rule，與告警同一份定義。",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -346,7 +346,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_request_duration_seconds_bucket{namespace=\"fab\",job=\"tool-api\",route=~\"/api/.*\",le=\"0.3\"}[5m])) / sum(rate(http_request_duration_seconds_count{namespace=\"fab\",job=\"tool-api\",route=~\"/api/.*\"}[5m]))",
+          "expr": "fab:sli_latency:ratio_rate5m",
           "legendFormat": "within 300ms",
           "datasource": {
             "type": "prometheus",
@@ -392,7 +392,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(1 - ((sum(rate(http_requests_total{namespace=\"fab\",job=\"tool-api\",route=~\"/api/.*\",code=~\"5..\"}[5m])) or vector(0)) / sum(rate(http_requests_total{namespace=\"fab\",job=\"tool-api\",route=~\"/api/.*\"}[5m]))) / 0.01)",
+          "expr": "1 - (1 - fab:sli_availability:ratio_rate5m) / 0.01",
           "legendFormat": "remaining",
           "datasource": {
             "type": "prometheus",

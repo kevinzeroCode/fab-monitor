@@ -1,0 +1,80 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fab-monitor-slo
+  labels:
+    # 必須符合 values.yaml 的 ruleSelector；少了這個標籤，Prometheus 不會載入這份規則，
+    # 而且不會報錯，只是 Rule health 頁面看不到。
+    release: fab-monitor
+spec:
+  groups:
+    # SLI 和告警放同一群組：群組內由上到下依序評估，告警讀到的是本輪剛算好的 SLI。
+    # 分成兩個群組的話，兩邊各自計時，告警可能讀到上一輪的值。
+    - name: fab-slo
+      rules:
+        # recording rule 把複雜查詢的結果存成新指標，告警和 Grafana 共用同一份定義，數字才不會對不上。
+        # 名稱用「層級:指標:運算」：fab 是彙總層級（整個服務），sli_availability 是量什麼，
+        # ratio_rate5m 是怎麼算的（5 分鐘 rate 的比例）。看名字就知道它不是原始 metric。
+        - record: fab:sli_availability:ratio_rate5m
+          # route 只算資料端點，排除 /api/chaos（控制端點）和 /api/whoami（網頁輪詢），原因見 docs/slo.md。
+          # 用「1 - 壞事件比例」而不是「好事件 ÷ 全部」：新 Pod 全部回 5xx 時好事件沒有 series，
+          # 分子是空值，整條算不出來，告警反而不響。or vector(0) 則處理從未出現過 5xx 的健康狀態。
+          # 沒有流量時分母是 0，結果是 NaN，不會被當成 100% 達標。
+          expr: |
+            1 - (
+              sum(rate(http_requests_total{namespace="fab", job="tool-api", route=~"/api/tools.*", code=~"5.."}[5m]))
+              or vector(0)
+            )
+            /
+            sum(rate(http_requests_total{namespace="fab", job="tool-api", route=~"/api/tools.*"}[5m]))
+
+        - record: fab:sli_latency:ratio_rate5m
+          # 直接用 histogram 的 le="0.3" bucket 計算 300ms 內的比例，不用 p95：
+          # SLO 問的是「多少請求夠快」，這個比例不必估算，p95 則是分桶內插出來的近似值。
+          # bucket 是累計的，le="0.3" 已包含所有更快的請求。
+          expr: |
+            sum(rate(http_request_duration_seconds_bucket{namespace="fab", job="tool-api", route=~"/api/tools.*", le="0.3"}[5m]))
+            /
+            sum(rate(http_request_duration_seconds_count{namespace="fab", job="tool-api", route=~"/api/tools.*"}[5m]))
+
+        - alert: ToolApiHighErrorRate
+          # NaN 跟任何數字比較都不成立，所以沒有流量時不會觸發；演練時要開 make load。
+          expr: fab:sli_availability:ratio_rate5m < 0.99
+          # for 要求條件連續成立 1 分鐘：這段期間狀態是 Pending，之後才變 Firing，
+          # 用來過濾一閃而過的抖動。中途只要有一次不成立，計時就重來。
+          for: 1m
+          annotations:
+            summary: tool-api 可用性低於 99%
+            description: 最近 5 分鐘資料端點的可用性為 {{ $value | humanizePercentage }}，低於 SLO 99%。
+            runbook: https://github.com/kevinzeroCode/fab-monitor/blob/main/docs/runbook.md#toolapihigherrorrate
+
+        - alert: ToolApiSlowResponses
+          expr: fab:sli_latency:ratio_rate5m < 0.95
+          for: 1m
+          annotations:
+            summary: tool-api 300ms 內完成的比例低於 95%
+            description: 最近 5 分鐘資料端點只有 {{ $value | humanizePercentage }} 的請求在 300ms 內完成，低於 SLO 95%。
+            runbook: https://github.com/kevinzeroCode/fab-monitor/blob/main/docs/runbook.md#toolapislowresponses
+
+        - alert: ToolApiPodNotReady
+          # condition="true" 這條序列在 Pod Ready 時為 1，所以 == 0 代表不 Ready。
+          # 不用 condition="false" == 1，因為狀態 unknown 時那條是 0，會漏掉。
+          expr: kube_pod_status_ready{namespace="fab", pod=~"tool-api-.*", condition="true"} == 0
+          # 滾動更新時新 Pod 本來就會短暫不 Ready；等 2 分鐘才算問題，避免每次部署都告警。
+          for: 2m
+          annotations:
+            summary: tool-api Pod {{ $labels.pod }} 不 Ready
+            description: Pod {{ $labels.pod }} 已超過 2 分鐘不 Ready，已被移出 Service。Redis 連不上時也是這條告警負責。
+            runbook: https://github.com/kevinzeroCode/fab-monitor/blob/main/docs/runbook.md#toolapipodnotready
+
+        - alert: ToolDataStale
+          # 資料存在同一個 Redis，每個 API 副本回報的是同一件事。用 max() 合併成一條，
+          # 否則兩個副本會各發一條告警。max() 會略過 NaN，全部副本都讀不到時才是 NaN，不觸發。
+          # 看 API 端指標而不看 simulator 自己的：simulator 掛掉時它的 /metrics 也會消失，告警反而不響。
+          expr: max(tool_data_age_seconds{namespace="fab", job="tool-api"}) > 30
+          # 30 秒和 2 分鐘是告警門檻，不是 30 天的 SLO，兩者的差別見 docs/slo.md。
+          for: 2m
+          annotations:
+            summary: 機台資料超過 30 秒沒有更新
+            description: 最舊機台資料已經 {{ $value | humanizeDuration }} 沒有更新。API 可能仍回 200，請沿資料流排查。
+            runbook: https://github.com/kevinzeroCode/fab-monitor/blob/main/docs/runbook.md#tooldatastale

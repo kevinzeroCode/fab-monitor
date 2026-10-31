@@ -4,6 +4,8 @@ kind: Kustomization
 namespace: monitoring
 resources:
   - servicemonitors.yaml
+  # namespace 由上方統一設成 monitoring，才符合 Prometheus 的 ruleNamespaceSelector。
+  - rules.yaml
 configMapGenerator:
   - name: fab-dashboard
     files:

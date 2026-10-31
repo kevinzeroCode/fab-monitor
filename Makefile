@@ -17,7 +17,7 @@ export KIND_EXPERIMENTAL_PROVIDER = docker
 MONITORING_CHART_VERSION := 92.14.1
 RPS ?= 20
 
-.PHONY: help build up down logs test ps cluster cluster-down load load-images deploy deploy-observability status watch scale kill-pod rollout rollback break-redis fix-redis monitoring grafana prometheus
+.PHONY: help build up down logs test ps cluster cluster-down load load-images deploy deploy-observability status watch scale kill-pod rollout rollback break-redis fix-redis monitoring grafana prometheus chaos-latency chaos-errors chaos-clear
 .DEFAULT_GOAL := help
 
 help:
@@ -43,13 +43,17 @@ help:
 	@echo "  make rollback            Restore previous API Pod template and wait"
 	@echo "  make break-redis         Set Redis desired replicas to zero"
 	@echo "  make fix-redis           Restore Redis and wait for API availability"
-	@echo "Phase 3a - D7 observability (D8 alerts require confirmation)"
+	@echo "Phase 3a - D7 observability"
 	@echo "  make load-images VERSION=v3  Load built D7 images without running loadgen"
 	@echo "  make deploy-observability Apply D7 v3 overlay; keep base v1 lab intact"
 	@echo "  make monitoring          Install pinned monitoring stack and app monitors"
 	@echo "  make grafana             Show local credentials; forward localhost:3000"
 	@echo "  make prometheus          Forward Prometheus to localhost:9090"
 	@echo "  make load S=60 [RPS=20]  Send fixed-rate requests (needs dev dependencies)"
+	@echo "Phase 3b - D8 alert drills"
+	@echo "  make chaos-latency       Add 500ms latency on every API pod"
+	@echo "  make chaos-errors        Fail 20% of API requests on every API pod"
+	@echo "  make chaos-clear         Clear injected faults on every API pod"
 
 build:
 	$(COMPOSE) build tool-api tool-simulator
@@ -152,3 +156,7 @@ grafana:
 prometheus:
 	@echo "Prometheus: http://localhost:9090 (local lab; no login)"
 	$(KUBECTL) -n monitoring port-forward --address 127.0.0.1 service/fab-monitor-prometheus 9090:9090
+
+# chaos 存在每個 Pod 的記憶體；由 tools/chaos.py 逐一進 Pod 設定，不能只打 NodePort。
+chaos-latency chaos-errors chaos-clear:
+	$(PYTHON) tools/chaos.py $(patsubst chaos-%,%,$@) --context "$(KUBE_CONTEXT)"
